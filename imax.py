@@ -63,9 +63,7 @@ def get_imax_schedules():
             )
 
             if page_response.status != 200:
-                raise Exception(
-                    f"CGV 페이지 접속 실패: {page_response.status}"
-                )
+    print("페이지 응답은 403이지만 API 접속을 계속 확인합니다.")
 
             print("브라우저 세션 준비 완료!")
 
