@@ -1,9 +1,10 @@
+
 name: CGV 광교 IMAX 알리미
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/5 * * * *"
 
 permissions:
   contents: write
@@ -15,8 +16,6 @@ jobs:
     steps:
       - name: 저장소 가져오기
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Python 설치
         uses: actions/setup-python@v5
@@ -24,7 +23,9 @@ jobs:
           python-version: "3.11"
 
       - name: 필요한 프로그램 설치
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
 
       - name: IMAX 알리미 실행
         env:
@@ -46,5 +47,5 @@ jobs:
               git push
             fi
           else
-            echo "last_imax.json 파일이 없습니다. 저장을 건너뜁니다."
+            echo "last_imax.json 파일이 없습니다."
           fi
