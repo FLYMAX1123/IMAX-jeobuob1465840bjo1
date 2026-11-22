@@ -3,14 +3,15 @@ import os
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from urllib.parse import urlencode
 
 from playwright.sync_api import sync_playwright
+
 
 THEATER_NAME = "CGV 광교"
 THEATER_CODE = "0257"
 
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+
 STATE_FILE = "last_imax.json"
 
 BOOKING_PAGE = "https://cgv.co.kr/cnm/movieBook/cinema"
@@ -23,145 +24,161 @@ def get_imax_schedules():
 
     print("=" * 40)
     print("CGV 광교 IMAX 확인 시작")
-    print("접속 방식: Playwright Chromium")
+    print("Playwright Chromium 방식")
     print("=" * 40)
 
     imax_list = []
 
-    with sync_playwright() as p:
+    today = datetime.now(KST).date()
 
-        browser = p.chromium.launch(headless=True)
+    with sync_playwright() as playwright:
+
+        browser = playwright.chromium.launch(
+            headless=True
+        )
+
+        context = browser.new_context(
+            locale="ko-KR",
+            timezone_id="Asia/Seoul"
+        )
 
         try:
-            context = browser.new_context(
-                locale="ko-KR",
-                timezone_id="Asia/Seoul"
-            )
 
             page = context.new_page()
 
-            # 브라우저로 예매 페이지에 먼저 접속해 세션 확보
-            response = page.goto(
+            print("CGV 예매 페이지 접속 중...")
+
+            page_response = page.goto(
                 BOOKING_PAGE,
                 wait_until="domcontentloaded",
                 timeout=60000
             )
 
-            if response is None or response.status >= 400:
-                status = response.status if response else "응답 없음"
+            if page_response is None:
+                raise Exception("CGV 페이지 응답이 없습니다.")
+
+            print(
+                "CGV 페이지 상태:",
+                page_response.status
+            )
+
+            if page_response.status != 200:
                 raise Exception(
-                    f"CGV 예매 페이지 접속 실패: {status}"
+                    f"CGV 페이지 접속 실패: {page_response.status}"
                 )
 
-            print("예매 페이지 접속 성공:", response.status)
-
-            today = datetime.now(KST).date()
+            print("브라우저 세션 준비 완료!")
 
             for i in range(14):
 
                 target_date = today + timedelta(days=i)
+
                 date_text = target_date.strftime("%Y%m%d")
 
-                params = {
-                    "coCd": "A420",
-                    "siteNo": THEATER_CODE,
-                    "scnYmd": date_text,
-                    "rtctlScopCd": "08"
-                }
+                print()
+                print(f"{date_text} 조회 중...")
 
-                try:
-                    api_response = context.request.get(
-                        API_URL,
-                        params=params,
-                        headers={
-                            "Accept": "application/json, text/plain, */*",
-                            "Accept-Language": "ko-KR,ko;q=0.9",
-                            "Referer": BOOKING_PAGE
-                        },
-                        timeout=30000
-                    )
+                response = context.request.get(
+                    API_URL,
+                    params={
+                        "coCd": "A420",
+                        "siteNo": THEATER_CODE,
+                        "scnYmd": date_text,
+                        "rtctlScopCd": "08"
+                    },
+                    headers={
+                        "Accept": "application/json, text/plain, */*",
+                        "Accept-Language": "ko-KR,ko;q=0.9",
+                        "Referer": BOOKING_PAGE
+                    },
+                    timeout=30000
+                )
 
-                    print(
-                        f"{date_text} API 상태:",
-                        api_response.status
-                    )
+                print(
+                    "API 상태:",
+                    response.status
+                )
 
-                    if api_response.status != 200:
-                        raise Exception(
-                            f"CGV API 오류: {api_response.status}"
-                        )
-
-                    data = api_response.json()
-
-                    if data.get("statusCode") != 0:
-                        raise Exception(
-                            f"CGV 응답 오류: {data}"
-                        )
-
-                    schedules = data.get("data") or []
-
-                    for schedule in schedules:
-
-                        screen_name = schedule.get("scnsNm") or ""
-                        display_screen_name = (
-                            schedule.get("expoScnsNm") or ""
-                        )
-                        movie_format = (
-                            schedule.get("movkndDsplNm") or ""
-                        )
-
-                        search_text = " ".join([
-                            screen_name,
-                            display_screen_name,
-                            movie_format
-                        ]).upper()
-
-                        if "IMAX" not in search_text:
-                            continue
-
-                        movie_name = (
-                            schedule.get("movNm")
-                            or schedule.get("prodNm")
-                            or "영화명 없음"
-                        )
-
-                        start_time = schedule.get("scnsrtTm") or ""
-
-                        schedule_id = (
-                            f"{date_text}|{movie_name}|"
-                            f"{screen_name}|{start_time}"
-                        )
-
-                        item = {
-                            "id": schedule_id,
-                            "date": date_text,
-                            "movie": movie_name,
-                            "screen": display_screen_name or screen_name,
-                            "time": start_time
-                        }
-
-                        imax_list.append(item)
-
-                        print("IMAX 발견:", item)
-
-                except Exception as error:
-                    # 일부 날짜라도 조회 실패하면 상태 파일을
-                    # 갱신하지 않도록 전체 실행을 중단
+                if response.status != 200:
                     raise Exception(
-                        f"{date_text} 조회 실패: {error}"
+                        f"{date_text} API 조회 실패: "
+                        f"{response.status}"
                     )
 
-            context.close()
+                data = response.json()
+
+                if data.get("statusCode") not in (0, "0"):
+                    raise Exception(
+                        f"CGV API 오류: {data}"
+                    )
+
+                schedules = data.get("data") or []
+
+                for schedule in schedules:
+
+                    screen_name = (
+                        schedule.get("scnsNm") or ""
+                    )
+
+                    display_screen_name = (
+                        schedule.get("expoScnsNm") or ""
+                    )
+
+                    movie_format = (
+                        schedule.get("movkndDsplNm") or ""
+                    )
+
+                    search_text = " ".join([
+                        screen_name,
+                        display_screen_name,
+                        movie_format
+                    ]).upper()
+
+                    if "IMAX" not in search_text:
+                        continue
+
+                    movie_name = (
+                        schedule.get("movNm")
+                        or schedule.get("prodNm")
+                        or "영화명 없음"
+                    )
+
+                    start_time = (
+                        schedule.get("scnsrtTm") or ""
+                    )
+
+                    schedule_id = (
+                        f"{date_text}|"
+                        f"{movie_name}|"
+                        f"{screen_name}|"
+                        f"{start_time}"
+                    )
+
+                    imax_info = {
+                        "id": schedule_id,
+                        "date": date_text,
+                        "movie": movie_name,
+                        "screen": (
+                            display_screen_name or screen_name
+                        ),
+                        "time": start_time
+                    }
+
+                    imax_list.append(imax_info)
+
+                    print("IMAX 발견:", imax_info)
+
+            unique_imax = {
+                item["id"]: item
+                for item in imax_list
+            }
+
+            return list(unique_imax.values())
 
         finally:
+
+            context.close()
             browser.close()
-
-    unique_imax = {
-        item["id"]: item
-        for item in imax_list
-    }
-
-    return list(unique_imax.values())
 
 
 def load_previous_imax():
@@ -169,19 +186,23 @@ def load_previous_imax():
     if not os.path.exists(STATE_FILE):
         return None
 
-    try:
-        with open(STATE_FILE, "r", encoding="utf-8") as file:
-            return json.load(file)
+    with open(
+        STATE_FILE,
+        "r",
+        encoding="utf-8"
+    ) as file:
 
-    except Exception as error:
-        raise Exception(
-            f"기존 IMAX 기록을 읽지 못했습니다: {error}"
-        )
+        return json.load(file)
 
 
 def save_imax(imax_list):
 
-    with open(STATE_FILE, "w", encoding="utf-8") as file:
+    with open(
+        STATE_FILE,
+        "w",
+        encoding="utf-8"
+    ) as file:
+
         json.dump(
             imax_list,
             file,
@@ -193,7 +214,9 @@ def save_imax(imax_list):
 def send_discord(new_imax):
 
     if not WEBHOOK_URL:
-        raise Exception("DISCORD_WEBHOOK_URL이 없습니다.")
+        raise Exception(
+            "DISCORD_WEBHOOK_URL이 없습니다."
+        )
 
     message = (
         f"🎥 **{THEATER_NAME} IMAX 예매 오픈!**\n\n"
@@ -235,55 +258,62 @@ def send_discord(new_imax):
         )
 
     message += (
-        "🔔 CGV 광교에서 새로운 IMAX 상영이 열렸습니다!"
+        "🔔 CGV 광교 IMAX 신규 상영이 발견되었습니다!"
     )
 
-    with sync_playwright() as p:
+    from playwright.sync_api import sync_playwright
 
-        request = p.request.new_context()
+    # Discord 전송은 일반 HTTPS 요청으로 처리
+    import urllib.request
 
-        try:
-            response = request.post(
-                WEBHOOK_URL,
-                data=json.dumps(
-                    {"content": message},
-                    ensure_ascii=False
-                ),
-                headers={
-                    "Content-Type": "application/json"
-                },
-                timeout=30000
-            )
+    request = urllib.request.Request(
+        WEBHOOK_URL,
+        data=json.dumps({
+            "content": message
+        }).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json"
+        },
+        method="POST"
+    )
 
-            print("Discord 전송 상태:", response.status)
+    with urllib.request.urlopen(
+        request,
+        timeout=30
+    ) as response:
 
-            if response.status not in [200, 204]:
-                raise Exception(
-                    f"Discord 전송 실패: {response.status}"
-                )
+        print(
+            "Discord 전송 상태:",
+            response.status
+        )
 
-        finally:
-            request.dispose()
+        if response.status not in (200, 204):
+            raise Exception("Discord 전송 실패")
 
 
 def main():
 
-    today_text = datetime.now(KST).strftime("%Y%m%d")
+    today = datetime.now(KST).date()
 
+    today_text = today.strftime("%Y%m%d")
+
+    # CGV 조회가 실패하면 여기서 중단되므로
+    # 기존 last_imax.json은 그대로 유지됨
     current_imax = get_imax_schedules()
 
     print()
-    print("현재 IMAX 상영 개수:", len(current_imax))
+    print("현재 IMAX 개수:", len(current_imax))
 
     previous_imax = load_previous_imax()
 
+    # 최초 실행은 기준값만 저장
     if previous_imax is None:
 
-        print("첫 실행입니다. 현재 상태를 기준값으로 저장합니다.")
-
+        print("첫 실행입니다.")
         save_imax(current_imax)
 
         print("기준값 저장 완료!")
+
         return
 
     previous_ids = {
@@ -302,7 +332,7 @@ def main():
 
     if new_imax:
 
-        print("새로운 IMAX 상영 발견!")
+        print("새로운 IMAX 발견!")
 
         for item in new_imax:
             print(item)
@@ -310,8 +340,10 @@ def main():
         send_discord(new_imax)
 
     else:
+
         print("새로운 IMAX 상영이 없습니다.")
 
+    # 조회와 알림이 모두 정상적으로 끝난 뒤 저장
     save_imax(current_imax)
 
     print("IMAX 기록 저장 완료!")
