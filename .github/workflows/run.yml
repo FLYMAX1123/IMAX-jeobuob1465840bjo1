@@ -3,8 +3,6 @@ name: CGV 광교 IMAX 알리미
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "*/5 * * * *"
 
 permissions:
   contents: write
@@ -22,7 +20,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: 필요한 프로그램 설치
+      - name: Playwright 설치
         run: |
           pip install -r requirements.txt
           python -m playwright install --with-deps chromium
@@ -46,6 +44,4 @@ jobs:
               git commit -m "Update IMAX schedules"
               git push
             fi
-          else
-            echo "last_imax.json 파일이 없습니다."
           fi
