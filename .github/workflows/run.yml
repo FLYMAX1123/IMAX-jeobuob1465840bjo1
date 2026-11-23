@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   run:
-    runs-on: ubuntu-24.04
+    runs-on: windows-latest
 
     steps:
       - name: 저장소 가져오기
@@ -21,9 +21,10 @@ jobs:
           python-version: "3.11"
 
       - name: Playwright 설치
+        shell: bash
         run: |
-          pip install -r requirements.txt
-          python -m playwright install --with-deps chromium
+          python -m pip install -r requirements.txt
+          python -m playwright install chromium
 
       - name: IMAX 알리미 실행
         env:
@@ -31,13 +32,13 @@ jobs:
         run: python imax.py
 
       - name: IMAX 기록 저장
+        shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           if [ -f last_imax.json ]; then
             git add last_imax.json
-
             if git diff --cached --quiet; then
               echo "변경된 IMAX 기록이 없습니다."
             else
