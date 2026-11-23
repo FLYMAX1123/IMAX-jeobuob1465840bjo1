@@ -12,26 +12,28 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: 저장소 가져오기
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Python 설치
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Playwright 설치
+      - name: Install dependencies
         shell: bash
         run: |
           python -m pip install -r requirements.txt
           python -m playwright install chromium
 
-      - name: IMAX 알리미 실행
+      - name: Run IMAX alarm
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: python imax.py
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+        run: python -X utf8 imax.py
 
-      - name: IMAX 기록 저장
+      - name: Save IMAX records
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
@@ -39,9 +41,7 @@ jobs:
 
           if [ -f last_imax.json ]; then
             git add last_imax.json
-            if git diff --cached --quiet; then
-              echo "변경된 IMAX 기록이 없습니다."
-            else
+            if ! git diff --cached --quiet; then
               git commit -m "Update IMAX schedules"
               git push
             fi
